@@ -1,0 +1,72 @@
+# Scan sinyal (mode signal/paper) tiap ~5 menit + publish dashboard ke GitHub Pages.
+# JANGAN pakai workflow ini untuk live trading (cron GitHub bisa telat belasan menit). Live -> deploy.yml (VPS).
+name: Scan & Dashboard
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "signal atau paper"
+        default: signal
+        type: choice
+        options: [signal, paper]
+
+concurrency:
+  group: scan
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ambil state dari branch data (jika ada)
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: data
+          path: state
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Jalankan satu siklus
+        env:
+          PYTHONPATH: src
+          SITE_DIR: site
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m scalper.main --once --mode "${{ github.event.inputs.mode || 'signal' }}"
+      - name: Simpan state ke branch data
+        run: |
+          cd state
+          if [ ! -d .git ]; then
+            git init -q -b data
+            git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          fi
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -qm "state $(date -u +%FT%TZ)" || exit 0
+          git push -q origin HEAD:data
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy-pages:
+    needs: scan
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
