@@ -1,0 +1,9 @@
+# Dipakai di VPS. .env berisi BOT_IMAGE=ghcr.io/<user>/<repo>:latest + semua API key.
+services:
+  bot:
+    image: ${BOT_IMAGE}
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./state:/app/state
